@@ -1,0 +1,394 @@
+package parser;
+
+/**********************************************************************
+ Java CUP specification for a parser for C-- programs
+ **********************************************************************/
+
+import java_cup.runtime.*;
+import java.util.*;
+import java.io.*;
+import ast.*;
+import lexer.*;
+
+/* The code below redefines method syntax_error to give better error messages
+ * than just "Syntax error"
+ */
+parser code {:
+
+public void syntax_error(Symbol currToken) {
+    if (currToken.value == null) {
+        ErrMsg.fatal(0,0, "Syntax error at end of file");
+    }
+    else {
+        ErrMsg.fatal(((TokenVal)currToken.value).linenum,
+                     ((TokenVal)currToken.value).charnum,
+                     "Syntax error");
+    }
+    throw new SyntaxErrorException();
+    // System.exit(-1);
+}
+:};
+
+
+/* Terminals (tokens returned by the scanner) */
+terminal                INT;
+terminal                BOOL;
+terminal                DOUBLE;
+terminal                VOID;
+terminal TokenVal       TRUE;
+terminal TokenVal       FALSE;
+terminal                STRUCT;
+terminal                CIN;
+terminal                COUT;
+terminal                IF;
+terminal                ELSE;
+terminal                WHILE;
+terminal                RETURN;
+terminal IdTokenVal     ID;
+terminal IntLitTokenVal INTLITERAL;
+terminal DoubleLitTokenVal DOUBLELITERAL;
+terminal StrLitTokenVal STRINGLITERAL;
+terminal                LCURLY;
+terminal                RCURLY;
+terminal                LPAREN;
+terminal                RPAREN;
+terminal                SEMICOLON;
+terminal                COMMA;
+terminal                DOT;
+terminal                WRITE;
+terminal                READ;
+terminal                PLUSPLUS;
+terminal                MINUSMINUS;
+terminal                PLUS;
+terminal                MINUS;
+terminal                TIMES;
+terminal                DIVIDE;
+terminal                NOT;
+terminal                AND;
+terminal                OR;
+terminal                EQUALS;
+terminal                NOTEQUALS;
+terminal                LESS;
+terminal                GREATER;
+terminal                LESSEQ;
+terminal                GREATEREQ;
+terminal                ASSIGN;
+
+
+/* Nonterminals
+ *
+ * NOTE: You will need to add more nonterminals to this list as you
+ *       add productions to the grammar below.
+ */
+non terminal AST.ProgramNode      program;
+non terminal LinkedList       declList;
+non terminal AST.DeclNode         decl;
+non terminal LinkedList       varDeclList;
+non terminal AST.VarDeclNode      varDecl;
+non terminal AST.FnDeclNode       fnDecl;
+non terminal AST.StructDeclNode   structDecl;
+non terminal LinkedList       structBody;
+non terminal LinkedList       formals;
+non terminal LinkedList       formalsList;
+non terminal AST.FormalDeclNode   formalDecl;
+non terminal AST.FnBodyNode       fnBody;
+non terminal LinkedList       stmtList;
+non terminal AST.StmtNode         stmt;
+non terminal AST.AssignNode       assignExp;
+non terminal AST.ExpNode          exp;
+non terminal AST.ExpNode          term;
+non terminal AST.CallExpNode      fncall;
+non terminal LinkedList       actualList;
+non terminal AST.TypeNode         type;
+non terminal AST.ExpNode          loc;
+non terminal AST.IdNode           id;
+ 
+ 
+/* NOTE: Add precedence and associativity declarations here */
+precedence right ASSIGN;
+precedence left OR;
+precedence left AND;
+precedence nonassoc EQUALS, NOTEQUALS, LESS, GREATER, LESSEQ, GREATEREQ;
+precedence left PLUS, MINUS;
+precedence left TIMES, DIVIDE;
+precedence right NOT;
+
+start with program;
+
+
+/* Grammar with actions
+ *
+ * NOTE: add more grammar rules below
+ */
+program         ::= declList: d
+                {: RESULT = new AST.ProgramNode(new AST.DeclListNode(d));
+                :}
+                ;
+
+declList        ::= declList:dl decl:d
+                {: dl.addLast(d);
+                   RESULT = dl;
+                :}
+                | /* epsilon */
+                {: RESULT = new LinkedList<AST.DeclNode>();
+                :}
+                ;
+
+decl            ::= varDecl:v
+                {: RESULT = v;
+                :}
+                | fnDecl:f
+                {: RESULT = f;
+                :}
+                | structDecl:s
+                {: RESULT = s;
+                :}
+                ;
+
+varDeclList     ::= varDeclList:vdl varDecl:vd
+                {: vdl.addLast(vd);
+                   RESULT = vdl;
+                :}
+                | /* epsilon */
+                {: RESULT = new LinkedList<AST.VarDeclNode>();
+                :}
+                ;
+
+varDecl         ::= type:t id:i SEMICOLON
+                {: RESULT = new AST.VarDeclNode(t, i, AST.VarDeclNode.NOT_STRUCT);
+                :}
+                | STRUCT id:t id:i SEMICOLON
+                {: RESULT = new AST.VarDeclNode(new AST.StructNode(t), i, 0);
+                :}
+                ;
+
+fnDecl          ::= type:t id:i formals:f fnBody:fb
+                {: RESULT = new AST.FnDeclNode(t, i, new AST.FormalsListNode(f), fb);
+                :}
+                ;
+
+structDecl      ::= STRUCT id:i LCURLY structBody:sb RCURLY SEMICOLON
+                {: RESULT = new AST.StructDeclNode(i, new AST.DeclListNode(sb));
+                :}
+                ;
+
+structBody      ::=  structBody:sb varDecl:vd 
+                {: sb.addLast(vd);
+                   RESULT = sb;
+                :}
+                | varDecl:vd
+                {: LinkedList<AST.VarDeclNode> list = 
+				                           new LinkedList<AST.VarDeclNode>();
+                   list.addLast(vd);
+                   RESULT = list;
+                :}
+                ;
+
+formals         ::= LPAREN RPAREN
+                {: RESULT = new LinkedList<AST.FormalDeclNode>();
+                :}
+                | LPAREN formalsList:fl RPAREN
+                {: RESULT = fl;
+                :}
+                ;
+
+formalsList     ::= formalDecl:fd
+                {: LinkedList<AST.FormalDeclNode> list = 
+				                              new LinkedList<AST.FormalDeclNode>();
+                   list.addLast(fd);
+                   RESULT = list;
+                :}
+                | formalDecl:fd COMMA formalsList:fl
+                {: fl.addFirst(fd);
+                   RESULT = fl;
+                :}
+
+                ;
+
+formalDecl      ::= type:t id:i
+                {: RESULT = new AST.FormalDeclNode(t, i);
+                :}
+                ;
+
+fnBody          ::= LCURLY varDeclList:vdl stmtList:sl RCURLY
+                {: RESULT = new AST.FnBodyNode(
+                            new AST.DeclListNode(vdl), new AST.StmtListNode(sl));
+                :}
+                ;
+
+stmtList        ::= stmtList:sl stmt:s
+                {: sl.addLast(s);
+				   RESULT = sl;
+                :}
+                | /* epsilon */
+                {: RESULT = new LinkedList<AST.StmtNode>();
+                :}
+                ;
+
+stmt            ::= assignExp:ae SEMICOLON
+                {: RESULT = new AST.AssignStmtNode(ae);
+				:}
+                | loc:lc PLUSPLUS SEMICOLON
+                {: RESULT = new AST.PostIncStmtNode(lc);
+                :}
+                | loc:lc MINUSMINUS SEMICOLON
+                {: RESULT = new AST.PostDecStmtNode(lc);
+                :}
+                | CIN READ exp:e SEMICOLON
+                {: RESULT = new AST.ReadStmtNode(e);
+                :}				
+                | COUT WRITE exp:e SEMICOLON
+                {: RESULT = new AST.WriteStmtNode(e);
+                :}				
+                | IF LPAREN exp:e RPAREN LCURLY varDeclList:vdl stmtList:sl RCURLY
+                {: RESULT = new AST.IfStmtNode(e, 
+				                new AST.DeclListNode(vdl), new AST.StmtListNode(sl));
+                :}				
+                | IF LPAREN exp:e RPAREN LCURLY varDeclList:vdlt stmtList:slt RCURLY ELSE LCURLY varDeclList:vdle stmtList:sle RCURLY
+                {: RESULT = new AST.IfElseStmtNode(e, 
+				                new AST.DeclListNode(vdlt), new AST.StmtListNode(slt),
+								new AST.DeclListNode(vdle), new AST.StmtListNode(sle));
+                :}	
+                | WHILE LPAREN exp:e RPAREN LCURLY varDeclList:vdl stmtList:sl RCURLY
+                {: RESULT = new AST.WhileStmtNode(e, 
+				                new AST.DeclListNode(vdl), new AST.StmtListNode(sl));
+                :}				
+                | RETURN exp:e SEMICOLON
+                {: RESULT = new AST.ReturnStmtNode(e);
+                :}
+				| RETURN SEMICOLON
+                {: RESULT = new AST.ReturnStmtNode(null);
+                :}
+				| fncall:f SEMICOLON
+				{: RESULT = new AST.CallStmtNode(f);
+				:}
+                ;				
+
+assignExp       ::= loc:lc ASSIGN exp:e
+                {: RESULT = new AST.AssignNode(lc, e);
+				:}
+				;
+				
+exp             ::= assignExp:ae
+                {: RESULT = ae;
+				:}
+                | exp:e1 PLUS exp:e2
+                {: RESULT = new AST.PlusNode(e1, e2);
+                :}				
+                | exp:e1 MINUS exp:e2
+                {: RESULT = new AST.MinusNode(e1, e2);
+                :}					
+                | exp:e1 TIMES exp:e2
+                {: RESULT = new AST.TimesNode(e1, e2);
+                :}	
+                | exp:e1 DIVIDE exp:e2
+                {: RESULT = new AST.DivideNode(e1, e2);
+                :}	
+                | NOT exp:e
+                {: RESULT = new AST.NotNode(e);
+                :}	
+                | exp:e1 AND exp:e2
+                {: RESULT = new AST.AndNode(e1, e2);
+                :}	
+                | exp:e1 OR exp:e2
+                {: RESULT = new AST.OrNode(e1, e2);
+                :}	
+                | exp:e1 EQUALS exp:e2
+                {: RESULT = new AST.EqualsNode(e1, e2);
+                :}	
+                | exp:e1 NOTEQUALS exp:e2
+                {: RESULT = new AST.NotEqualsNode(e1, e2);
+                :}	
+                | exp:e1 LESS exp:e2
+                {: RESULT = new AST.LessNode(e1, e2);
+                :}	
+                | exp:e1 GREATER exp:e2
+                {: RESULT = new AST.GreaterNode(e1, e2);
+                :}	
+                | exp:e1 LESSEQ exp:e2
+                {: RESULT = new AST.LessEqNode(e1, e2);
+                :}	
+                | exp:e1 GREATEREQ exp:e2
+                {: RESULT = new AST.GreaterEqNode(e1, e2);
+                :}	
+                | MINUS exp:e
+                {: RESULT = new AST.UnaryMinusNode(e);
+                :}	
+                | term:t
+                {: RESULT = t;
+                :}
+                ;	
+				
+term            ::= loc:lc
+                {: RESULT = lc;
+                :}
+				| INTLITERAL:i
+				{: RESULT = new AST.IntLitNode(i.linenum, i.charnum, i.intVal);
+				:}
+                | DOUBLELITERAL:i
+				{: RESULT = new AST.DoubleLitNode(i.linenum, i.charnum, i.doubleVal);
+				:}
+				| STRINGLITERAL:s
+				{: RESULT = new AST.StringLitNode(s.linenum, s.charnum, s.strVal);
+				:}
+				| TRUE:t
+				{: RESULT = new AST.TrueNode(t.linenum, t.charnum);
+				:}
+				| FALSE:f
+				{: RESULT = new AST.FalseNode(f.linenum, f.charnum);
+				:}
+				| LPAREN exp:e RPAREN
+				{: RESULT = e;
+				:}
+				| fncall:f
+				{: RESULT = f;
+				:}
+                ;	
+
+fncall          ::= id:i LPAREN RPAREN
+                {: RESULT = new AST.CallExpNode(i, 
+				                new AST.ExpListNode(new LinkedList<AST.ExpNode>()));
+				:}
+				| id:i LPAREN actualList:al RPAREN
+                {: RESULT = new AST.CallExpNode(i, new AST.ExpListNode(al));
+				:}
+				;
+				
+actualList      ::= exp:e
+                {: LinkedList<AST.ExpNode> list = new LinkedList<AST.ExpNode>();
+				   list.addLast(e);
+				   RESULT = list;
+				:}
+				| actualList:al COMMA exp:e
+				{: al.addLast(e);
+				   RESULT = al;
+				:}
+				;
+
+type            ::= INT
+                {: RESULT = new AST.IntNode();
+                :}
+                | DOUBLE
+                {: RESULT = new AST.DoubleNode();
+                :}
+                | BOOL
+                {: RESULT = new AST.BoolNode();
+                :}
+                | VOID
+                {: RESULT = new AST.VoidNode();
+                :}
+                ;
+
+loc             ::= id:i
+                {: RESULT = i;
+				:}
+				| loc:lc DOT id:i
+				{: RESULT = new AST.DotAccessExpNode(lc, i);
+				:}
+				;
+				
+id              ::= ID:i
+                {: RESULT = new AST.IdNode(i.linenum, i.charnum, i.idVal);
+                :}
+                ;
+				
